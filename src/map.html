@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NASA GIBS Historical Map Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;overflow:hidden}
+    #map{width:100vw;height:100vh}
+    .controls{position:absolute;top:20px;right:20px;background:#fff;padding:20px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:1000;max-width:320px}
+    .controls h3{margin-bottom:15px;font-size:16px;color:#333}
+    .date-display{font-size:24px;font-weight:700;color:#06c;margin-bottom:15px;text-align:center}
+    .layer-select{margin-bottom:15px}
+    .layer-select label{display:block;margin-bottom:5px;font-size:14px;color:#555}
+    .layer-select select{width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
+    .timeline-slider{width:100%;margin:15px 0}
+    input[type="range"]{width:100%;height:6px;border-radius:3px;background:#e0e0e0;outline:none}
+    input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#06c;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+    input[type="range"]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#06c;cursor:pointer;border:none;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+    .year-labels{display:flex;justify-content:space-between;font-size:12px;color:#666;margin-top:5px}
+    .play-controls{display:flex;gap:10px;margin-top:15px}
+    button{flex:1;padding:10px;background:#06c;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;transition:background .2s}
+    button:hover{background:#0052a3}
+    button:disabled{background:#ccc;cursor:not-allowed}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="controls">
+    <h3>NASA Earth Observation</h3>
+    <div class="date-display" id="dateDisplay">—</div>
+
+    <div class="layer-select">
+      <label>Layer Type:</label>
+      <select id="layerSelect">
+        <option value="MODIS_Terra_CorrectedReflectance_TrueColor">True Color (Terra/MODIS)</option>
+        <option value="MODIS_Aqua_CorrectedReflectance_TrueColor">True Color (Aqua/MODIS)</option>
+        <option value="VIIRS_SNPP_CorrectedReflectance_TrueColor">True Color (VIIRS/SNPP)</option>
+        <option value="MODIS_Terra_L3_NDVI_16Day">NDVI (MODIS Terra, 16-Day)</option>
+      </select>
+    </div>
+
+    <div class="timeline-slider">
+      <input type="range" id="timeSlider" min="0" max="1" value="0" step="1">
+      <div class="year-labels">
+        <span id="labelStart">Start</span>
+        <span id="labelMid">Mid</span>
+        <span id="labelEnd">End</span>
+      </div>
+    </div>
+
+    <div class="play-controls">
+      <button id="playBtn">▶ Play</button>
+      <button id="todayBtn">Today</button>
+    </div>
+  </div>
+
+  <script>
+    // ===== UTC-safe helpers (avoid DST issues) =====
+    const DAY = 86400000;
+    const asUTCNoon = d => { const x = new Date(d); x.setUTCHours(12,0,0,0); return x; };
+    const dateUTC = (y,m,d) => new Date(Date.UTC(y, m, d, 12, 0, 0));
+    const parseISOUTC = s => { const [y,m,d]=s.split('-').map(Number); return dateUTC(y,m-1,d); };
+    const toISODate = d => {
+      const x = asUTCNoon(d);
+      const y = x.getUTCFullYear();
+      const m = String(x.getUTCMonth()+1).padStart(2,'0');
+      const dd = String(x.getUTCDate()).padStart(2,'0');
+      return `${y}-${m}-${dd}`;
+    };
+    const addDaysUTC = (d,n) => asUTCNoon(new Date(asUTCNoon(d).getTime() + n*DAY));
+    const daysBetweenUTC = (a,b) => Math.round((asUTCNoon(b) - asUTCNoon(a)) / DAY);
+    const todayUTC = () => asUTCNoon(new Date());
+
+    // ===== Layer metadata =====
+    const LAYER_META = {
+      MODIS_Terra_CorrectedReflectance_TrueColor: { ext: "jpg", stepDays: 1,  start: "2000-02-24" },
+      MODIS_Aqua_CorrectedReflectance_TrueColor:  { ext: "jpg", stepDays: 1,  start: "2002-07-04" },
+      VIIRS_SNPP_CorrectedReflectance_TrueColor:  { ext: "jpg", stepDays: 1,  start: "2012-01-20" },
+      // 16-day NDVI anchored to 2025-10-23
+      MODIS_Terra_L3_NDVI_16Day:                    { ext: "png", stepDays: 16, start: "2000-02-18", phase: "2025-10-23" }
+    };
+    const getMeta = id => LAYER_META[id] || { ext:"jpg", stepDays:1, start:"2000-01-01" };
+
+    // ===== Map / UI =====
+    const map = L.map('map', { center: [20,0], zoom: 3, minZoom: 2, maxZoom: 9 });
+    let currentLayer = null;
+    let playing = false;
+
+    const timeSlider  = document.getElementById('timeSlider');
+    const dateDisplay = document.getElementById('dateDisplay');
+    const layerSelect = document.getElementById('layerSelect');
+    const playBtn     = document.getElementById('playBtn');
+    const todayBtn    = document.getElementById('todayBtn');
+    const labelStart  = document.getElementById('labelStart');
+    const labelMid    = document.getElementById('labelMid');
+    const labelEnd    = document.getElementById('labelEnd');
+
+    // Use a global base so one slider works for all layers
+    const GLOBAL_BASE_START = parseISOUTC("2000-02-18");
+    const dateFromSlider = idx => addDaysUTC(GLOBAL_BASE_START, parseInt(idx,10));
+
+    function firstPhaseAlignedOnOrAfterStart(layerId){
+      const meta  = getMeta(layerId);
+      const start = parseISOUTC(meta.start);
+      const step  = meta.stepDays || 1;
+      const phase = meta.phase ? parseISOUTC(meta.phase) : start;
+      const k = Math.ceil(daysBetweenUTC(phase, start) / step);
+      return addDaysUTC(phase, k*step);
+    }
+
+    function snapDateForLayer(d, layerId){
+      const meta  = getMeta(layerId);
+      const step  = meta.stepDays || 1;
+      const prodStart = parseISOUTC(meta.start);
+      const x = asUTCNoon(d);
+
+      if (!meta.phase){
+        return (x < prodStart) ? prodStart : x; // daily products: clamp to start
+      }
+
+      // phased (16-day) — floor to the previous multiple from the phase
+      const phase = parseISOUTC(meta.phase);
+      const diffDays = daysBetweenUTC(phase, x);
+      const steps = Math.floor(diffDays / step);
+      let snapped = addDaysUTC(phase, steps*step);
+
+      const alignedStart = firstPhaseAlignedOnOrAfterStart(layerId);
+      if (snapped < alignedStart) snapped = alignedStart;
+      return snapped;
+    }
+
+    // ===== Tiles =====
+    function createGIBSLayer(layerId, dateISO){
+      const meta = getMeta(layerId);
+      const url  = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layerId}/default/${dateISO}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.${meta.ext}`;
+      return L.tileLayer(url, {
+        attribution: '© NASA EOSDIS GIBS',
+        tileSize: 256,
+        noWrap: true,
+        crossOrigin: true,
+        bounds: [[-85.0511,-180],[85.0511,180]]
+      });
+    }
+
+    // ===== Slider range/labels =====
+    function setSliderRange(){
+      const end = todayUTC();
+      const max = Math.max(0, daysBetweenUTC(GLOBAL_BASE_START, end));
+      timeSlider.min = "0";
+      timeSlider.max = String(max);
+
+      const startYear = GLOBAL_BASE_START.getUTCFullYear();
+      const endYear   = end.getUTCFullYear();
+      labelStart.textContent = startYear;
+      labelMid.textContent   = Math.floor((startYear + endYear)/2);
+      labelEnd.textContent   = endYear;
+    }
+
+    function snapSliderTo(date){
+      const idx = daysBetweenUTC(GLOBAL_BASE_START, date);
+      timeSlider.value = String(idx);
+    }
+
+    // ===== Buffered update (add new ASAP, then swap) =====
+    async function updateMap(){
+      const layerId = layerSelect.value;
+      const raw     = dateFromSlider(timeSlider.value);
+      const snapped = snapDateForLayer(raw, layerId);
+      const dateStr = toISODate(snapped);
+      dateDisplay.textContent = dateStr;
+
+      // create next layer and add immediately so it can start fetching tiles
+      const nextLayer = createGIBSLayer(layerId, dateStr);
+      nextLayer.addTo(map);
+
+      // Wait until tiles either load or error (but don’t block forever)
+      await new Promise((resolve)=>{
+        let settled = false;
+        const done = ()=>{ if (!settled){ settled = true; resolve(); } };
+        nextLayer.once('load', done);
+        nextLayer.once('tileerror', done);
+        setTimeout(done, 1500); // safety cap
+      });
+
+      // Swap: remove old after next is ready/settled
+      if (currentLayer){ map.removeLayer(currentLayer); }
+      currentLayer = nextLayer;
+    }
+
+    // ===== Play (3s per frame, imagery loads ASAP) =====
+    async function togglePlay(){
+      if (playing){ playing = false; playBtn.textContent = '▶ Play'; return; }
+      playing = true; playBtn.textContent = '⏸ Pause';
+
+      const layerId = layerSelect.value;
+      const meta    = getMeta(layerId);
+      const step    = meta.stepDays || 1;
+
+      while (playing){
+        const current = snapDateForLayer(dateFromSlider(timeSlider.value), layerId);
+        const next    = addDaysUTC(current, step);
+
+        // wrap to anchor if we run past earliest available
+        const earliest = firstPhaseAlignedOnOrAfterStart(layerId);
+        const nextClamped = (next < earliest)
+          ? snapDateForLayer(parseISOUTC(getMeta(layerId).phase), layerId)
+          : next;
+
+        snapSliderTo(nextClamped);
+        await updateMap();
+
+        // Hold each frame ~3 seconds
+        const HOLD_MS = 3000;
+        const start = performance.now();
+        while (playing && performance.now() - start < HOLD_MS){
+          await new Promise(r=>setTimeout(r,150));
+        }
+      }
+    }
+
+    function goToToday(){
+      const t = snapDateForLayer(todayUTC(), layerSelect.value);
+      snapSliderTo(t);
+      updateMap();
+    }
+
+    // ===== Events =====
+    timeSlider.addEventListener('input', ()=>{
+      // Snap slider visually to valid frame so the thumb only ever lands on allowed dates
+      const snapped = snapDateForLayer(dateFromSlider(timeSlider.value), layerSelect.value);
+      snapSliderTo(snapped);
+      updateMap();
+    });
+
+    layerSelect.addEventListener('change', ()=>{
+      const meta = getMeta(layerSelect.value);
+      // If switching to 16-day NDVI, jump to the anchor; otherwise keep current date snapped
+      const target = meta.phase ? snapDateForLayer(parseISOUTC(meta.phase), layerSelect.value)
+                                : snapDateForLayer(dateFromSlider(timeSlider.value), layerSelect.value);
+      snapSliderTo(target);
+      updateMap();
+    });
+
+    document.getElementById('playBtn').addEventListener('click', togglePlay);
+    document.getElementById('todayBtn').addEventListener('click', goToToday);
+
+    // ===== Init =====
+    setSliderRange();
+    // Start at today's valid frame for default layer
+    const startAt = snapDateForLayer(todayUTC(), layerSelect.value);
+    snapSliderTo(startAt);
+    updateMap();
+  </script>
+</body>
+</html>
