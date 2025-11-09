@@ -90,56 +90,143 @@ async def predict_forest_cover(request: PredictionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/future/{country_name}")
-async def get_future_predictions(country_name: str, start_year: int = 2011, end_year: int = 2075):
-    """Get future forest cover predictions for a country (2011-2075)"""
+@router.get("/time-series/{country_name}")
+async def get_time_series_data(country_name: str, start_year: int = 2000, end_year: int = 2075):
+    """Get forest cover time series data for a country (2000-2075)
+    
+    Data classification:
+    - 2000-2010: Real data (from FAO Global Forest Resources Assessment)
+    - 2011-2025: Interpolated/modeled data (based on trends and verified sources)
+    - 2026-2075: Predictions (ML model forecasts)
+    """
     try:
         if not data_manager.is_initialized():
             data_manager.initialize()
         
-        predictions_df = get_predictions_data()
-        if predictions_df.empty:
+        time_series = data_manager.get_forest_cover_by_year(country_name, start_year, end_year)
+        
+        if time_series is None:
             raise HTTPException(
                 status_code=404,
-                detail="Predictions data not available"
+                detail=f"Country '{country_name}' not found or time series data not available"
             )
         
-        # Find country (case-insensitive)
-        country_data = predictions_df[
-            predictions_df['country'].str.lower() == country_name.lower()
-        ]
+        return {
+            "success": True,
+            "data": time_series,
+            "data_classification": {
+                "real": "Actual measurements from FAO (2000-2010)",
+                "interpolated": "Model-based/interpolated data verified against trends (2011-2025)",
+                "prediction": "ML model forecasts (2026-2075)"
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/future/{country_name}")
+async def get_future_predictions(country_name: str, start_year: int = 2026, end_year: int = 2075):
+    """Get future forest cover predictions for a country (2026-2075)
+    
+    Note: For historical data (2000-2025), use /time-series endpoint
+    """
+    try:
+        if not data_manager.is_initialized():
+            data_manager.initialize()
         
-        if country_data.empty:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Country '{country_name}' not found in predictions data"
-            )
-        
-        country_row = country_data.iloc[0]
-        
-        # Get year columns (2011-2075)
-        year_columns = [str(year) for year in range(start_year, end_year + 1) if str(year) in predictions_df.columns]
-        
-        if not year_columns:
+        if start_year < 2026:
             raise HTTPException(
                 status_code=400,
-                detail=f"No prediction data available for years {start_year}-{end_year}"
+                detail="For data before 2026, use /time-series endpoint. This endpoint is for predictions (2026-2075)"
             )
         
-        # Extract predictions
-        predictions = {
-            "country": country_row['country'],
-            "area_km2": float(country_row['area']),
-            "baseline_2000": float(country_row.get('2000', 0)),
-            "baseline_2010": float(country_row.get('2010', 0)),
-            "predictions": {
-                year: float(country_row[year]) for year in year_columns
-            }
+        time_series = data_manager.get_forest_cover_by_year(country_name, start_year, end_year)
+        
+        if time_series is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Country '{country_name}' not found or predictions data not available"
+            )
+        
+        # Filter only predictions (2026+)
+        predictions_data = {
+            year: data
+            for year, data in time_series["data"].items()
+            if data["data_type"] == "prediction"
         }
         
         return {
             "success": True,
-            "data": predictions
+            "data": {
+                "country": time_series["country"],
+                "area_km2": time_series["area_km2"],
+                "predictions": predictions_data
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/country/{country_name}/year/{year}")
+async def get_country_year_data(country_name: str, year: int):
+    """Get forest cover data for a specific country and year (2000-2075)
+    
+    Args:
+        country_name: Name of the country (case-insensitive)
+        year: Year between 2000 and 2075
+    
+    Returns:
+        Forest cover percentage, data type, and country information
+    """
+    try:
+        if not data_manager.is_initialized():
+            data_manager.initialize()
+        
+        # Validate year range
+        if year < 2000 or year > 2075:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Year must be between 2000 and 2075. Received: {year}"
+            )
+        
+        # Get time series data for the specific year
+        time_series = data_manager.get_forest_cover_by_year(country_name, year, year)
+        
+        if time_series is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Country '{country_name}' not found"
+            )
+        
+        year_str = str(year)
+        if year_str not in time_series["data"]:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Data for year {year} not available for country '{country_name}'"
+            )
+        
+        year_data = time_series["data"][year_str]
+        
+        # Calculate forest area in km²
+        forest_area_km2 = (time_series["area_km2"] * year_data["forest_cover_percent"]) / 100.0
+        
+        return {
+            "success": True,
+            "data": {
+                "country": time_series["country"],
+                "year": year,
+                "area_km2": float(time_series["area_km2"]),
+                "forest_cover_percent": year_data["forest_cover_percent"],
+                "forest_area_km2": float(forest_area_km2),
+                "data_type": year_data["data_type"],
+                "data_type_description": {
+                    "real": "Actual measurements from FAO (2000-2010)",
+                    "interpolated": "Model-based/interpolated data verified against trends (2011-2025)",
+                    "prediction": "ML model forecasts (2026-2075)"
+                }.get(year_data["data_type"], "Unknown")
+            }
         }
     except HTTPException:
         raise

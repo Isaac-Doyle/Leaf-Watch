@@ -45,6 +45,11 @@ async def root():
             "statistics": "/api/statistics",
             "predictions": "/api/predictions",
             "analysis": "/api/analysis"
+        },
+        "example_endpoints": {
+            "country_year": "/api/predictions/country/Brazil/year/2020",
+            "time_series": "/api/predictions/time-series/Brazil?start_year=2000&end_year=2025",
+            "future": "/api/predictions/future/Brazil?start_year=2026&end_year=2075"
         }
     }
 
