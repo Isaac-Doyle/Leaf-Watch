@@ -8,7 +8,7 @@ export default function Header() {
       <div className="container nav">
         {/* Logo / brand (left) */}
         <a href="/" className="brand" aria-label="Leaf Watch home">
-          <span className="brand-text">Leaf Watch</span>
+          <span className="brand-text">Leaf Watch 🍃</span>
         </a>
 
         {/* Actions (right) */}

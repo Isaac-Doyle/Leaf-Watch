@@ -30,9 +30,9 @@ body { margin: 0; }
   z-index: 1000;
   width: 100%;
   padding: var(--pad-y) 0;                 /* vertical only; sides from .container */
-  background: rgba(255,255,255,.65);       /* subtle glass */
+  background: rgba(237, 237, 237, 0.65);       /* subtle glass */
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(16,24,40,.06);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.1);
 }
 
 
@@ -76,7 +76,7 @@ body { margin: 0; }
   margin: 0 0 10px 0;          /* same spacing as controls */
   font-size: 16px;
   font-weight: 800;
-  color: #fff;
+  color: #ffffff;
 }
 .stats-card ul{
   margin: 0;
@@ -105,12 +105,13 @@ body { margin: 0; }
 /* Wrap map in <div class="container"> then this wraps the iframe */
 .map-wrap{
   width: 100%;
-  height: 70vh;
+  height: 85vh;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 8px 30px rgba(0,0,0,.12);
   /* top spacing now handled by .stats-card’s bottom margin */
   margin-top: 0;
+  margin-bottom: 15px;
 }
 .map-frame{
   width: 100%;
