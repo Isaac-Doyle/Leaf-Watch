@@ -9,8 +9,8 @@ class StatisticsCalculator:
     @staticmethod
     def get_overview_statistics(df: pd.DataFrame) -> Dict:
         """Calculate overall statistics"""
-        countries_with_loss = len(df[df['delta_percent'] < 0])  # Negative = loss
-        countries_with_gain = len(df[df['delta_percent'] > 0])  # Positive = gain
+        countries_with_loss = len(df[df['delta_percent'] > 0])  # Positive = loss (2000 - 2010)
+        countries_with_gain = len(df[df['delta_percent'] < 0])  # Negative = gain
         countries_no_change = len(df[df['delta_percent'] == 0])
         
         return {
@@ -27,13 +27,13 @@ class StatisticsCalculator:
             "countries_no_change": countries_no_change,
             "pct_countries_with_loss": float(countries_with_loss / len(df) * 100),
             "pct_countries_with_gain": float(countries_with_gain / len(df) * 100),
-            "avg_deforestation": float(df[df['delta_percent'] < 0]['delta_percent'].mean()),  # Negative = loss
-            "avg_reforestation": float(df[df['delta_percent'] > 0]['delta_percent'].mean()),  # Positive = gain
-            "total_forest_area_lost_km2": float(df[df['delta_area'] < 0]['delta_area'].abs().sum()),  # Negative = loss, convert to positive
-            "highest_deforestation_country": df.loc[df['delta_percent'].idxmin(), 'country'],  # Most negative = worst loss
-            "highest_deforestation_percent": float(df['delta_percent'].min()),  # Most negative = worst loss
-            "highest_reforestation_country": df.loc[df['delta_percent'].idxmax(), 'country'],  # Most positive = best gain
-            "highest_reforestation_percent": float(df['delta_percent'].max())  # Most positive = best gain
+            "avg_deforestation": float(df[df['delta_percent'] > 0]['delta_percent'].mean()),  # Positive = loss (2000 - 2010)
+            "avg_reforestation": float(df[df['delta_percent'] < 0]['delta_percent'].abs().mean()),  # Negative = gain, convert to positive
+            "total_forest_area_lost_km2": float(df[df['delta_area'] > 0]['delta_area'].sum()),  # Positive = loss
+            "highest_deforestation_country": df.loc[df['delta_percent'].idxmax(), 'country'],  # Most positive = worst loss
+            "highest_deforestation_percent": float(df['delta_percent'].max()),  # Most positive = worst loss
+            "highest_reforestation_country": df.loc[df['delta_percent'].idxmin(), 'country'],  # Most negative = best gain
+            "highest_reforestation_percent": float(abs(df['delta_percent'].min()))  # Most negative = best gain, convert to positive
         }
     
     @staticmethod

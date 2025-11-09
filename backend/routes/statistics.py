@@ -48,8 +48,8 @@ async def get_country_statistics(country_name: str):
                 "change_percent": float(row['delta_percent']),
                 "change_km2": float(row['delta_area']),
                 "change_type": (
-                    "reforestation" if row['delta_percent'] > 0
-                    else "deforestation" if row['delta_percent'] < 0
+                    "deforestation" if row['delta_percent'] > 0
+                    else "reforestation" if row['delta_percent'] < 0
                     else "no_change"
                 )
             }
@@ -73,8 +73,8 @@ async def get_top_deforestation(limit: int = 10):
             "data": [
                 {
                     "country": row['country'],
-                    "forest_loss_percent": float(abs(row['delta_percent'])),  # Convert to positive for loss
-                    "forest_loss_km2": float(abs(row['delta_area'])),  # Convert to positive for loss
+                    "forest_loss_percent": float(row['delta_percent']),  # Already positive for loss
+                    "forest_loss_km2": float(row['delta_area']),  # Already positive for loss
                     "forest_cover_2000": float(row['two_thousand_percent']),
                     "forest_cover_2010": float(row['two_thousand_ten_percent'])
                 }
@@ -98,8 +98,8 @@ async def get_top_reforestation(limit: int = 10):
             "data": [
                 {
                     "country": row['country'],
-                    "forest_gain_percent": float(row['delta_percent']),  # Already positive for gain
-                    "forest_gain_km2": float(row['delta_area']),  # Already positive for gain
+                    "forest_gain_percent": float(abs(row['delta_percent'])),  # Convert to positive for gain
+                    "forest_gain_km2": float(abs(row['delta_area'])),  # Convert to positive for gain
                     "forest_cover_2000": float(row['two_thousand_percent']),
                     "forest_cover_2010": float(row['two_thousand_ten_percent'])
                 }
@@ -127,8 +127,8 @@ async def get_all_countries():
                     "forest_cover_2010": float(row['two_thousand_ten_percent']),
                     "change_percent": float(row['delta_percent']),
                     "change_type": (
-                        "gain" if row['delta_percent'] > 0
-                        else "loss" if row['delta_percent'] < 0
+                        "loss" if row['delta_percent'] > 0
+                        else "gain" if row['delta_percent'] < 0
                         else "stable"
                     )
                 }
